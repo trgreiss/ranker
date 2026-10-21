@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ranker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    // Apply the saved theme before first paint to avoid a flash. Light is the default.
+    try { if (localStorage.getItem('ranker.theme') === 'dark') document.documentElement.dataset.theme = 'dark'; } catch (e) {}
+  </script>
+</head>
+<body>
+  <header class="app-bar">
+    <h1>Ranker</h1>
+    <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark mode" title="Switch to dark mode">
+      <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9z"/></svg>
+      <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3M4.6 4.6l2.1 2.1M17.3 17.3l2.1 2.1M4.6 19.4l2.1-2.1M17.3 6.7l2.1-2.1" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+  </header>
+
+  <main>
+    <section id="view-input" class="surface" hidden>
+      <label for="items">One item per line</label>
+      <textarea id="items" rows="14" spellcheck="false" placeholder="Item 1&#10;Item 2&#10;Item 3&#10;Item 4&#10;…"></textarea>
+      <div class="row">
+        <span id="input-status" class="muted"></span>
+        <button id="start" class="contained">Start ranking</button>
+      </div>
+    </section>
+
+    <section id="view-compare" hidden>
+      <div class="progress" aria-hidden="true"><div id="progress-bar"></div></div>
+      <p id="progress-text" class="muted"></p>
+      <h2 id="prompt">Click from most to least preferred</h2>
+      <div id="cards" class="cards"></div>
+      <div class="row">
+        <button id="undo" class="outlined">Undo</button>
+        <button id="restart" class="text">Edit list</button>
+      </div>
+    </section>
+
+    <section id="view-result" hidden>
+      <h2>Your ranking</h2>
+      <ol id="result" class="surface"></ol>
+      <div class="row">
+        <button id="copy" class="contained">Copy</button>
+        <button id="download" class="outlined">Download .txt</button>
+        <button id="result-undo" class="text">Undo last pick</button>
+        <button id="again" class="text">Rank a new list</button>
+      </div>
+    </section>
+  </main>
+  <script src="ranker.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
