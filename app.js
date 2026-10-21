@@ -28,18 +28,46 @@
     try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
   }
 
+  // Rows pasted from a spreadsheet arrive tab-separated. The first column is the item's label;
+  // any other columns are details shown beneath it. Items are stored as the tab-joined row.
   function parseItems(text) {
     const seen = new Set();
     const items = [];
     let dupes = 0;
+    let unlabeled = 0;
+    let detailColumns = 0;
     for (const line of text.split(/\r?\n/)) {
-      const item = line.trim();
-      if (!item) continue;
+      const cells = line.split('\t').map((c) => c.trim());
+      while (cells.length > 1 && !cells[cells.length - 1]) cells.pop();
+      if (!cells[0]) {
+        if (cells.length > 1) unlabeled++;
+        continue;
+      }
+      const item = cells.join('\t');
       if (seen.has(item.toLowerCase())) { dupes++; continue; }
       seen.add(item.toLowerCase());
       items.push(item);
+      detailColumns = Math.max(detailColumns, cells.length - 1);
     }
-    return { items, dupes };
+    return { items, dupes, unlabeled, detailColumns };
+  }
+
+  function splitItem(item) {
+    const [label, ...rest] = item.split('\t');
+    return { label, details: rest.filter(Boolean).join(', ') };
+  }
+
+  // Label in normal text with any details in a smaller line below.
+  function labelNodes(item, detailsClass) {
+    const { label, details } = splitItem(item);
+    const title = document.createElement('span');
+    title.className = 'item-label';
+    title.textContent = label;
+    if (!details) return [title];
+    const sub = document.createElement('span');
+    sub.className = detailsClass;
+    sub.textContent = details;
+    return [title, sub];
   }
 
   function show(view) {
@@ -49,9 +77,12 @@
   // ---- Input view ----
 
   function updateInputStatus() {
-    const { items, dupes } = parseItems($('items').value);
-    const parts = [`${items.length} item${items.length === 1 ? '' : 's'}`];
-    if (dupes) parts.push(`${dupes} duplicate${dupes === 1 ? '' : 's'} will be skipped`);
+    const { items, dupes, unlabeled, detailColumns } = parseItems($('items').value);
+    const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+    const parts = [plural(items.length, 'item')];
+    if (detailColumns) parts.push(`${plural(detailColumns, 'extra column')} shown as details`);
+    if (dupes) parts.push(`${plural(dupes, 'duplicate')} will be skipped`);
+    if (unlabeled) parts.push(`${plural(unlabeled, 'row')} with an empty first column will be skipped`);
     $('input-status').textContent = parts.join(' · ');
     $('start').disabled = items.length < 2;
   }
@@ -118,7 +149,7 @@
         badge.textContent = pickIndex + 1;
         card.append(badge);
       }
-      card.append(document.createTextNode(ranker.items[id]));
+      card.append(...labelNodes(ranker.items[id], 'card-details'));
       card.addEventListener('click', () => pick(id));
       cards.append(card);
     });
@@ -173,13 +204,17 @@
     const list = $('result');
     list.replaceChildren(...result.map((item) => {
       const li = document.createElement('li');
-      li.textContent = item;
+      li.append(...labelNodes(item, 'result-details'));
       return li;
     }));
   }
 
+  // Tabular lists export as tab-separated rows with a rank column, so they paste back into a
+  // spreadsheet; plain lists export as "1. item".
   function resultText() {
-    return ranker.result().map((item, i) => `${i + 1}. ${item}`).join('\n');
+    const result = ranker.result();
+    const tabular = result.some((item) => item.includes('\t'));
+    return result.map((item, i) => (tabular ? `${i + 1}\t${item}` : `${i + 1}. ${item}`)).join('\n');
   }
 
   async function copyResult() {

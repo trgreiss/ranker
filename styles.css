@@ -179,13 +179,16 @@ button:disabled { opacity: 0.38; cursor: default; box-shadow: none; }
   text-align: center;
   overflow-wrap: anywhere;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   cursor: pointer;
   transition: box-shadow 0.15s, border-color 0.15s, background-color 0.15s;
 }
 .card:hover { box-shadow: var(--elev-8); }
 .card.picked { border-color: var(--primary); background: var(--primary-tint); }
+.card .card-details { font-size: 0.875rem; font-weight: 300; color: var(--muted); }
 .card .badge {
   position: absolute;
   top: 0;
@@ -211,6 +214,7 @@ button:disabled { opacity: 0.38; cursor: default; box-shadow: none; }
 }
 #result li { padding: 8px 0; border-bottom: 1px solid var(--divider); overflow-wrap: anywhere; }
 #result li:last-child { border-bottom: 0; }
+#result .result-details { display: block; font-size: 0.8125rem; font-weight: 300; color: var(--muted); }
 
 @media (max-width: 480px) {
   .app-bar { height: 56px; padding-left: 16px; }

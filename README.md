@@ -7,6 +7,8 @@ Paste a list (one item per line), then click the cards from most to least prefer
 ## Features
 
 - Rank lists of any length; blank lines and duplicates are skipped
+- Paste rows from a spreadsheet: the first column is the item's name and any other columns appear as smaller details on each card (for example "1994, Quentin Tarantino" under "Pulp Fiction"). Plain one-per-line lists work as before.
+- Spreadsheet rankings copy and download as tab-separated rows with a rank column, so they paste straight back into a spreadsheet
 - Undo, plus automatic save and resume in the browser (refreshing mid-ranking is safe)
 - Progress bar with an estimate of picks remaining
 - Copy or download the final ranking as text
