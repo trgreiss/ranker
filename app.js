@@ -18,6 +18,7 @@
   let submitting = false;
   let lockedUntil = 0;
   let header = null; // header row of the list being ranked, if it had one (tab-joined)
+  let ratingColumn = null; // index of the column holding ratings, hidden on the compare cards
 
   function store(key, value) {
     try {
@@ -30,14 +31,15 @@
     try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
   }
 
-  function splitItem(item) {
+  // hideColumn: index of a column to leave out of the details (such as the rating column).
+  function splitItem(item, hideColumn) {
     const [label, ...rest] = item.split('\t');
-    return { label, details: rest.filter(Boolean).join(', ') };
+    return { label, details: rest.filter((c, i) => c && i + 1 !== hideColumn).join(', ') };
   }
 
   // Label in normal text with any details in a smaller line below.
-  function labelNodes(item, detailsClass) {
-    const { label, details } = splitItem(item);
+  function labelNodes(item, detailsClass, hideColumn) {
+    const { label, details } = splitItem(item, hideColumn);
     const title = document.createElement('span');
     title.className = 'item-label';
     title.textContent = label;
@@ -85,6 +87,7 @@
     const parsed = Items.parse($('items').value);
     if (parsed.items.length < 2) return;
     header = parsed.header;
+    ratingColumn = parsed.ratingColumn;
     const useRatings = parsed.rated && $('use-ratings').checked;
     ranker = Ranker.createRanker(parsed.items, useRatings ? { ratings: parsed.ratings } : {});
     save();
@@ -124,7 +127,7 @@
   // ---- Compare view ----
 
   function save() {
-    store(STORAGE_KEY, ranker ? Object.assign(ranker.serialize(), { header }) : null);
+    store(STORAGE_KEY, ranker ? Object.assign(ranker.serialize(), { header, ratingColumn }) : null);
   }
 
   function next() {
@@ -169,7 +172,7 @@
         badge.textContent = pickIndex + 1;
         card.append(badge);
       }
-      card.append(...labelNodes(ranker.items[id], 'card-details'));
+      card.append(...labelNodes(ranker.items[id], 'card-details', ratingColumn));
       card.addEventListener('click', () => pick(id));
       cards.append(card);
     });
@@ -213,6 +216,7 @@
     $('items').value = (header ? [header] : []).concat(ranker.items).join('\n');
     ranker = null;
     header = null;
+    ratingColumn = null;
     save();
     showInput();
   }
@@ -300,6 +304,10 @@
   if (saved && Array.isArray(saved.items) && saved.items.length >= 2) {
     ranker = Ranker.createRanker(saved.items, saved);
     header = typeof saved.header === 'string' ? saved.header : null;
+    // Sessions saved before ratingColumn was stored: find it again from the items.
+    ratingColumn = Number.isInteger(saved.ratingColumn)
+      ? saved.ratingColumn
+      : Items.parse((header ? [header] : []).concat(saved.items).join('\n')).ratingColumn;
     next();
   } else {
     $('items').value = load(DRAFT_KEY) || '';
