@@ -24,8 +24,24 @@
 
   <main>
     <section id="view-input" class="surface" hidden>
+      <details id="letterboxd" class="import">
+        <summary>Import films from Letterboxd</summary>
+        <ol class="steps">
+          <li>On Letterboxd, open <a href="https://letterboxd.com/settings/data/" target="_blank" rel="noopener">Settings → Data</a> and choose <strong>Export your data</strong>.</li>
+          <li>Pick the downloaded .zip here (or its <code>watched.csv</code> and <code>ratings.csv</code>).</li>
+        </ol>
+        <div class="row">
+          <button id="letterboxd-choose" class="outlined" type="button">Choose export…</button>
+          <input id="letterboxd-file" type="file" accept=".zip,.csv" multiple hidden>
+        </div>
+        <p id="letterboxd-status" class="muted" aria-live="polite">Every film logged as watched is imported with its star rating. Rated films more than 1 star apart are ordered by rating and never compared. The file is read in your browser and never uploaded.</p>
+      </details>
       <label for="items">One item per line</label>
       <textarea id="items" rows="14" spellcheck="false" placeholder="Item 1&#10;Item 2&#10;Item 3&#10;Item 4&#10;…"></textarea>
+      <label id="rating-option" class="checkbox" hidden>
+        <input id="use-ratings" type="checkbox" checked>
+        <span id="rating-text"></span>
+      </label>
       <div class="row">
         <span id="input-status" class="muted"></span>
         <button id="start" class="contained">Start ranking</button>
@@ -55,6 +71,8 @@
     </section>
   </main>
   <script src="ranker.js"></script>
+  <script src="items.js"></script>
+  <script src="letterboxd.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

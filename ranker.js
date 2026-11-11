@@ -9,6 +9,10 @@
 //      up to three new facts. Transitive inference fills in everything that follows.
 // Simulated at n = 500 it needs about 2,040 queries, versus about 2,500 for ternary binary
 // insertion, 3,800 for pairwise sorting, and a theoretical floor of 1,458 (see sim.js).
+//
+// Optional ratings (stars, or points on any numeric scale): two rated items more than 1 point
+// apart are ordered by rating and never shown together. Only items within 1 point of each other
+// (or unrated ones) are compared.
 (function (root) {
   'use strict';
 
@@ -48,6 +52,11 @@
     const less = (u, v) => has(worse[u], v);
     return {
       less,
+      // Record "u beats v" with no inference. Only for seeding a relation that is already transitive.
+      set(u, v) {
+        worse[u][v >>> 5] |= 1 << (v & 31);
+        better[v][u >>> 5] |= 1 << (u & 31);
+      },
       known: (u, v) => less(u, v) || less(v, u),
       // Record "u beats v" plus every consequence. Ignored if it contradicts what is known.
       add(u, v) {
@@ -65,6 +74,15 @@
   // Expected queries per merged item, measured with sim.js; used only for progress estimates.
   const RATE = { 2: 0.63, 3: 0.76 };
   const WINDOW = 3; // how far past each run's first unresolved item a query may reach
+  const RATING_GAP = 1; // rated items further apart than this are never compared
+  const EPSILON = 1e-9; // so 4.6 vs 3.6 counts as exactly 1 apart despite floating point
+
+  // Ratings per item id, or null when unrated. "a beats b by rating" is transitive on its own
+  // (gaps add up), so it can seed a closure directly.
+  function ratingOrder(ratings) {
+    if (!ratings || !ratings.some((r) => r != null)) return null;
+    return (a, b) => ratings[a] != null && ratings[b] != null && ratings[a] - ratings[b] > RATING_GAP + EPSILON;
+  }
 
   // The merge schedule depends only on n, so it can be planned up front for progress estimates.
   // Returns { runSizes, merges: [{ k, size }] } in execution order.
@@ -105,11 +123,19 @@
   }
 
   // Merge 2–3 sorted runs (arrays of ids, best first). Yields queries; receives them ordered.
-  function* mergeRuns(runs, state) {
+  // byRating(a, b): optional, true when a is known to beat b from ratings alone.
+  function* mergeRuns(runs, state, byRating) {
     const ids = runs.flat();
     const local = new Map(ids.map((id, i) => [id, i]));
     const C = createClosure(ids.length);
     const R = runs.map((r) => r.map((id) => local.get(id)));
+    // Pairs ordered by rating are settled up front and never appear together in a query.
+    const apart = byRating ? (u, v) => byRating(ids[u], ids[v]) || byRating(ids[v], ids[u]) : () => false;
+    if (byRating) {
+      for (let u = 0; u < ids.length; u++) {
+        for (let v = 0; v < ids.length; v++) if (byRating(ids[u], ids[v])) C.set(u, v);
+      }
+    }
     for (const r of R) for (let i = 0; i + 1 < r.length; i++) C.add(r[i], r[i + 1]);
     const head = R.map(() => 0); // first item in each run not yet placed against all others
 
@@ -141,13 +167,20 @@
       choose(cands, 2, 0, [], combos);
       for (const sel of combos) {
         let unknown = 0;
-        for (let a = 0; a < sel.length; a++) {
-          for (let b = a + 1; b < sel.length; b++) if (!C.known(sel[a].u, sel[b].u)) unknown++;
+        let allowed = true;
+        for (let a = 0; a < sel.length && allowed; a++) {
+          for (let b = a + 1; b < sel.length; b++) {
+            if (apart(sel[a].u, sel[b].u)) { allowed = false; break; }
+            if (!C.known(sel[a].u, sel[b].u)) unknown++;
+          }
         }
-        if (unknown === 0) continue;
+        if (!allowed || unknown === 0) continue;
         const score = unknown * 100 - sel.reduce((s, c) => s + c.cost, 0);
         if (score > bestScore) { bestScore = score; best = sel; }
       }
+      // Rating knowledge can leave an unknown pair outside the window; fall back to the
+      // front-most one so the merge always ends with a total order.
+      if (!best) best = frontmostUnknownPair(R, head, C);
       if (!best) break; // every cross-run relation is known
       const order = yield best.map((c) => ids[c.u]);
       const ranked = order.map((id) => local.get(id));
@@ -159,8 +192,26 @@
     return merged.map((i) => ids[i]);
   }
 
+  function frontmostUnknownPair(R, head, C) {
+    let best = null;
+    for (let k = 0; k < R.length; k++) {
+      for (let q = k + 1; q < R.length; q++) {
+        for (let i = head[k]; i < R[k].length; i++) {
+          for (let j = head[q]; j < R[q].length; j++) {
+            const cost = i - head[k] + j - head[q];
+            if ((!best || cost < best.cost) && !C.known(R[k][i], R[q][j])) {
+              best = { cost, sel: [{ u: R[k][i] }, { u: R[q][j] }] };
+            }
+          }
+        }
+      }
+    }
+    return best && best.sel;
+  }
+
   // Full sort. `state` is updated in place so callers can estimate remaining work.
-  function* mergeSort3(ids, state) {
+  // byRating: optional, see mergeRuns.
+  function* mergeSort3(ids, state, byRating) {
     const plan = planMerges(ids.length);
     state.plan = plan;
     state.groupsDone = 0;
@@ -169,7 +220,8 @@
     let runs = [];
     for (let i = 0; i < ids.length; i += 3) {
       const group = ids.slice(i, i + 3);
-      runs.push(group.length === 1 ? group : (yield group).slice());
+      // A group is a merge of single items, so ratings can settle some or all of it.
+      runs.push(group.length === 1 ? group : yield* mergeRuns(group.map((id) => [id]), state, byRating));
       state.groupsDone++;
     }
     while (runs.length > 1) {
@@ -179,7 +231,7 @@
         const group = runs.slice(i, i + k);
         if (k === 1) next.push(group[0]);
         else {
-          next.push(yield* mergeRuns(group, state));
+          next.push(yield* mergeRuns(group, state, byRating));
           state.mergeIndex++;
           state.unresolved = 0;
         }
@@ -207,18 +259,29 @@
     return s.size === b.length && b.every((v) => s.has(v));
   }
 
-  // items: array of strings. opts: { seed, answers } (answers from a previous serialize()).
+  // items: array of strings. opts: { seed, answers, ratings } (as returned by serialize()).
+  // ratings: optional array parallel to items of numeric ratings (stars or points) or null.
   function createRanker(items, opts) {
     opts = opts || {};
     const seed = opts.seed != null ? opts.seed >>> 0 : (Math.random() * 4294967296) >>> 0;
-    const order = shuffle(items.map((_, i) => i), mulberry32(seed));
+    let order = shuffle(items.map((_, i) => i), mulberry32(seed));
+    const ratings = Array.isArray(opts.ratings) && opts.ratings.length === items.length
+      ? opts.ratings.map((r) => (typeof r === 'number' && Number.isFinite(r) ? r : null))
+      : null;
+    const byRating = ratingOrder(ratings);
+    if (byRating) {
+      // Rated items go first in rating order (ties stay shuffled), unrated ones after. Merges then
+      // mostly interleave runs from neighbouring rating bands, which ratings largely settle.
+      const rated = order.filter((id) => ratings[id] != null).sort((a, b) => ratings[b] - ratings[a]);
+      order = rated.concat(order.filter((id) => ratings[id] == null));
+    }
     let answers = [];
     let gen, state, step;
 
     // Undo and resume work by replaying the answer log from the start.
     function replay(log) {
       state = {};
-      gen = mergeSort3(order, state);
+      gen = mergeSort3(order, state, byRating);
       step = gen.next();
       answers = [];
       for (const a of log) {
@@ -253,11 +316,11 @@
       comparisons: () => answers.length,
       estimateRemaining: () => (step.done ? 0 : estimateRemaining(state)),
       result: () => (step.done ? step.value.map((i) => items[i]) : null),
-      serialize: () => ({ items, seed, answers: answers.map((a) => a.slice()) }),
+      serialize: () => Object.assign({ items, seed, answers: answers.map((a) => a.slice()) }, byRating ? { ratings } : {}),
     };
   }
 
-  const api = { createRanker, mergeSort3, mulberry32, shuffle };
+  const api = { createRanker, mergeSort3, mulberry32, shuffle, RATING_GAP };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.Ranker = api;
 })(typeof self !== 'undefined' ? self : this);

@@ -121,6 +121,34 @@ textarea {
 textarea:hover { border-color: var(--muted); }
 textarea:focus { outline: none; border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary); }
 
+label.checkbox {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  margin: 12px 0 0;
+  font-size: 0.875rem;
+  font-weight: 400;
+  letter-spacing: normal;
+  text-transform: none;
+  color: var(--text);
+  cursor: pointer;
+}
+label.checkbox[hidden] { display: none; }
+label.checkbox input { margin: 3px 0 0; accent-color: var(--primary); }
+
+/* ---- Letterboxd import ---- */
+
+.import { margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid var(--divider); }
+.import summary { cursor: pointer; color: var(--primary); font-weight: 500; font-size: 0.875rem; }
+.import .steps { margin: 12px 0 0; padding-left: 24px; font-size: 0.875rem; }
+.import .steps li + li { margin-top: 4px; }
+.import a { color: var(--primary); }
+.import code { font-size: 0.8125rem; }
+.import .row { margin-top: 12px; }
+.import p { margin: 8px 0 0; font-size: 0.875rem; }
+.import p.error { color: #d32f2f; }
+:root[data-theme="dark"] .import p.error { color: #ef9a9a; }
+
 .row {
   display: flex;
   flex-wrap: wrap;

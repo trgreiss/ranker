@@ -171,5 +171,78 @@ for (let t = 0; t < 10; t++) {
   }
 }
 
+// Ratings: hidden orderings whose ratings follow the order with a little noise, a typical
+// Letterboxd spread (mostly 2.5–4.5 stars) on a 5-star or 10-point scale, some items unrated.
+// Checks: results are correct, no query shows two rated items more than 1 point apart, fewer picks.
+const { RATING_GAP } = require('./ranker.js');
+const SPREAD = [1, 2, 3, 5, 9, 14, 20, 22, 16, 8]; // relative frequency of 0.5★ … 5★ (or 1 … 10 points)
+function ratingsFor(rank, unratedShare, points) {
+  const total = SPREAD.reduce((s, x) => s + x, 0);
+  const n = rank.length;
+  return rank.map((pos) => {
+    if (rand() < unratedShare) return null;
+    let cum = 0;
+    let half = 1;
+    for (let h = 10; h >= 1; h--) { // best positions get the highest ratings
+      cum += SPREAD[h - 1] / total;
+      if ((pos + 0.5) / n <= cum) { half = h; break; }
+    }
+    const noise = Math.floor(rand() * 3) - 1; // up to half a star or half a point, so ratings never contradict the order
+    return points ? Math.min(10, Math.max(1, half + noise / 2)) : Math.min(10, Math.max(1, half + noise)) / 2;
+  });
+}
+console.log('\nwith ratings (mean picks / mean initial estimate):');
+for (const n of [50, 100, 500]) {
+  for (const [unratedShare, points] of [[0, false], [0.2, false], [0, true]]) {
+    let picks = 0;
+    let est = 0;
+    const trials = n >= 500 ? 4 : 10;
+    for (let t = 0; t < trials; t++) {
+      const items = [...Array(n).keys()].map((i) => `item ${i}`);
+      const rank = shuffle([...Array(n).keys()], rand);
+      const ratings = ratingsFor(rank, unratedShare, points);
+      const r = createRanker(items, { seed: 500 + t, ratings });
+      est += r.estimateRemaining();
+      while (!r.isDone()) {
+        const q = r.nextQuery();
+        for (const a of q) {
+          for (const b of q) {
+            if (ratings[a] != null && ratings[b] != null && ratings[a] - ratings[b] > RATING_GAP) {
+              failures++;
+              console.error(`FAIL query shows ${ratings[a]} pts with ${ratings[b]} pts`);
+            }
+          }
+        }
+        r.answer(q.slice().sort((a, b) => rank[a] - rank[b]));
+        if (rand() < 0.03) r.undo();
+      }
+      picks += r.comparisons();
+      if (!r.result().every((s, i) => rank[Number(s.split(' ')[1])] === i)) {
+        failures++;
+        console.error(`FAIL rated result n=${n}`);
+      }
+      const resumed = createRanker(items, r.serialize());
+      if (!resumed.isDone() || resumed.result().join() !== r.result().join()) {
+        failures++;
+        console.error('FAIL rated resume');
+      }
+    }
+    console.log(`n=${n} ${points ? "10-point" : "5-star  "} unrated ${unratedShare * 100}%  ${(picks / trials).toFixed(0)} / ${(est / trials).toFixed(0)}`);
+  }
+}
+
+// Ratings that contradict the answers (random clicks) must still produce a complete ranking.
+for (let t = 0; t < 10; t++) {
+  const items = [...Array(60).keys()].map((i) => `item ${i}`);
+  const ratings = items.map(() => (rand() < 0.8 ? (1 + Math.floor(rand() * 10)) / 2 : null));
+  const r = createRanker(items, { seed: 200 + t, ratings });
+  let guard = 0;
+  while (!r.isDone() && guard++ < 10000) r.answer(shuffle(r.nextQuery(), rand));
+  if (!r.isDone() || new Set(r.result()).size !== items.length) {
+    failures++;
+    console.error('FAIL random answers with ratings did not produce a complete ranking');
+  }
+}
+
 console.log(failures ? `\n${failures} failures` : '\nall checks passed');
 process.exitCode = failures ? 1 : 0;

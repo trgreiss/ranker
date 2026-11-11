@@ -5,6 +5,7 @@
   const STORAGE_KEY = 'ranker.session.v1';
   const DRAFT_KEY = 'ranker.draft.v1';
   const THEME_KEY = 'ranker.theme';
+  const USE_RATINGS_KEY = 'ranker.useRatings';
   // Pause after the final pick so the completed order is visible, then a short lockout once the
   // next cards appear so a click aimed at the old cards doesn't land on the new ones.
   const SUBMIT_DELAY_MS = 450;
@@ -16,6 +17,7 @@
   let picks = [];  // ids clicked so far, most preferred first
   let submitting = false;
   let lockedUntil = 0;
+  let header = null; // header row of the list being ranked, if it had one (tab-joined)
 
   function store(key, value) {
     try {
@@ -26,30 +28,6 @@
 
   function load(key) {
     try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; }
-  }
-
-  // Rows pasted from a spreadsheet arrive tab-separated. The first column is the item's label;
-  // any other columns are details shown beneath it. Items are stored as the tab-joined row.
-  function parseItems(text) {
-    const seen = new Set();
-    const items = [];
-    let dupes = 0;
-    let unlabeled = 0;
-    let detailColumns = 0;
-    for (const line of text.split(/\r?\n/)) {
-      const cells = line.split('\t').map((c) => c.trim());
-      while (cells.length > 1 && !cells[cells.length - 1]) cells.pop();
-      if (!cells[0]) {
-        if (cells.length > 1) unlabeled++;
-        continue;
-      }
-      const item = cells.join('\t');
-      if (seen.has(item.toLowerCase())) { dupes++; continue; }
-      seen.add(item.toLowerCase());
-      items.push(item);
-      detailColumns = Math.max(detailColumns, cells.length - 1);
-    }
-    return { items, dupes, unlabeled, detailColumns };
   }
 
   function splitItem(item) {
@@ -77,14 +55,24 @@
   // ---- Input view ----
 
   function updateInputStatus() {
-    const { items, dupes, unlabeled, detailColumns } = parseItems($('items').value);
+    const parsed = Items.parse($('items').value);
+    const { items, dupes, unlabeled, detailColumns, rated } = parsed;
     const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
     const parts = [plural(items.length, 'item')];
+    if (parsed.header) parts.push('first row used as column names');
     if (detailColumns) parts.push(`${plural(detailColumns, 'extra column')} shown as details`);
     if (dupes) parts.push(`${plural(dupes, 'duplicate')} will be skipped`);
     if (unlabeled) parts.push(`${plural(unlabeled, 'row')} with an empty first column will be skipped`);
     $('input-status').textContent = parts.join(' · ');
     $('start').disabled = items.length < 2;
+
+    $('rating-option').hidden = !rated;
+    if (rated) {
+      const stars = parsed.ratings.some((r, i) => r != null && items[i].includes('★'));
+      const name = parsed.header ? `“${parsed.ratingName}”` : parsed.ratingName;
+      $('rating-text').textContent = `Use ${name} as ratings (${rated} of ${plural(items.length, 'item')} rated): `
+        + `items more than ${stars ? '1★' : '1 point'} apart are ordered by rating without asking`;
+    }
   }
 
   function showInput() {
@@ -94,17 +82,49 @@
   }
 
   function start() {
-    const { items } = parseItems($('items').value);
-    if (items.length < 2) return;
-    ranker = Ranker.createRanker(items);
+    const parsed = Items.parse($('items').value);
+    if (parsed.items.length < 2) return;
+    header = parsed.header;
+    const useRatings = parsed.rated && $('use-ratings').checked;
+    ranker = Ranker.createRanker(parsed.items, useRatings ? { ratings: parsed.ratings } : {});
     save();
     next();
+  }
+
+  // ---- Letterboxd import ----
+
+  async function importLetterboxd() {
+    const input = $('letterboxd-file');
+    const status = $('letterboxd-status');
+    const setStatus = (text, isError) => {
+      status.textContent = text;
+      status.classList.toggle('error', !!isError);
+    };
+    try {
+      if (!input.files.length) return;
+      setStatus('Reading export…');
+      const films = await Letterboxd.readExport(input.files);
+      if ($('items').value.trim() && !confirm(`Replace the current list with ${films.length} films from Letterboxd?`)) {
+        return setStatus('Import cancelled.');
+      }
+      $('items').value = films
+        .map((f) => [f.title, f.year, f.rating ? Items.starText(f.rating) : ''].join('\t'))
+        .join('\n');
+      store(DRAFT_KEY, $('items').value);
+      updateInputStatus();
+      const rated = films.filter((f) => f.rating).length;
+      setStatus(`Imported ${films.length} films (${rated} rated). Edit the list below if you like, then start ranking.`);
+    } catch (e) {
+      setStatus(e instanceof Letterboxd.ExportError ? e.message : `Couldn't read that export: ${e.message}`, true);
+    } finally {
+      input.value = ''; // choosing the same file again should import it again
+    }
   }
 
   // ---- Compare view ----
 
   function save() {
-    store(STORAGE_KEY, ranker ? ranker.serialize() : null);
+    store(STORAGE_KEY, ranker ? Object.assign(ranker.serialize(), { header }) : null);
   }
 
   function next() {
@@ -190,8 +210,9 @@
 
   function editList() {
     if (ranker.comparisons() > 0 && !confirm('Start over? Your progress on this list will be lost.')) return;
-    $('items').value = ranker.items.join('\n');
+    $('items').value = (header ? [header] : []).concat(ranker.items).join('\n');
     ranker = null;
+    header = null;
     save();
     showInput();
   }
@@ -214,7 +235,9 @@
   function resultText() {
     const result = ranker.result();
     const tabular = result.some((item) => item.includes('\t'));
-    return result.map((item, i) => (tabular ? `${i + 1}\t${item}` : `${i + 1}. ${item}`)).join('\n');
+    const lines = result.map((item, i) => (tabular ? `${i + 1}\t${item}` : `${i + 1}. ${item}`));
+    if (tabular && header) lines.unshift(`Rank\t${header}`);
+    return lines.join('\n');
   }
 
   async function copyResult() {
@@ -248,6 +271,9 @@
     store(DRAFT_KEY, $('items').value);
   });
   $('start').addEventListener('click', start);
+  $('use-ratings').addEventListener('change', () => store(USE_RATINGS_KEY, $('use-ratings').checked));
+  $('letterboxd-choose').addEventListener('click', () => $('letterboxd-file').click());
+  $('letterboxd-file').addEventListener('change', importLetterboxd);
   $('undo').addEventListener('click', undo);
   $('restart').addEventListener('click', editList);
   $('copy').addEventListener('click', copyResult);
@@ -269,9 +295,11 @@
     try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* not remembered */ }
   });
 
+  if (load(USE_RATINGS_KEY) === false) $('use-ratings').checked = false;
   const saved = load(STORAGE_KEY);
   if (saved && Array.isArray(saved.items) && saved.items.length >= 2) {
     ranker = Ranker.createRanker(saved.items, saved);
+    header = typeof saved.header === 'string' ? saved.header : null;
     next();
   } else {
     $('items').value = load(DRAFT_KEY) || '';
