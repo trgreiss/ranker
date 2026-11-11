@@ -46,7 +46,7 @@ Two rated items more than 1 point (1 star) apart are never compared: a 3½★ fi
 
 The gap is always 1 point on the scale you used. On a 10-point scale that's a narrower band than 1 star on a 5-star scale, so more pairs are settled by rating and you're asked fewer questions.
 
-Rated items start the sort in rating order, so merges mostly interleave neighbouring rating bands. From the simulator, with a typical spread of ratings:
+Rated items start the sort in rating order, so merges mostly interleave neighbouring rating bands. The questions are still asked in a mixed order rather than from the highest rated down (see below). From the simulator, with a typical spread of ratings:
 
 | Items | No ratings | 5 stars, all rated | 5 stars, 20% unrated | 10 points, all rated |
 |------:|-----------:|-------------------:|---------------------:|---------------------:|
@@ -64,6 +64,8 @@ Ranker uses a **3-way merge sort** built around 3-item questions:
 3. Everything that follows from earlier answers (if A beats B and B beats C, then A beats C) is inferred automatically and never asked.
 
 Two-item questions appear only when two items are the only useful comparison left.
+
+Groups and merges that don't depend on each other can be worked on in any order, so each question is drawn from a random one of those ready to ask, and the cards within a question are shuffled. Only the order changes: the questions and their number are the same as working through the list front to back.
 
 Average number of picks, from the simulator:
 

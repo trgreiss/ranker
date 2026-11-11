@@ -84,27 +84,6 @@
     return (a, b) => ratings[a] != null && ratings[b] != null && ratings[a] - ratings[b] > RATING_GAP + EPSILON;
   }
 
-  // The merge schedule depends only on n, so it can be planned up front for progress estimates.
-  // Returns { runSizes, merges: [{ k, size }] } in execution order.
-  function planMerges(n) {
-    let runs = [];
-    for (let i = 0; i < n; i += 3) runs.push(Math.min(3, n - i));
-    const runSizes = runs.slice();
-    const merges = [];
-    while (runs.length > 1) {
-      const next = [];
-      for (let i = 0; i < runs.length; ) {
-        const k = groupSize(runs.length - i);
-        const size = runs.slice(i, i + k).reduce((s, x) => s + x, 0);
-        if (k > 1) merges.push({ k, size });
-        next.push(size);
-        i += k;
-      }
-      runs = next;
-    }
-    return { runSizes, merges };
-  }
-
   // Merge in threes; a single leftover run waits for the next level, and 2 or 4 leftovers
   // pair up so no merge is ever a lopsided 3-with-1.
   function groupSize(left) {
@@ -209,47 +188,89 @@
     return best && best.sel;
   }
 
-  // Full sort. `state` is updated in place so callers can estimate remaining work.
-  // byRating: optional, see mergeRuns.
-  function* mergeSort3(ids, state, byRating) {
-    const plan = planMerges(ids.length);
-    state.plan = plan;
-    state.groupsDone = 0;
-    state.mergeIndex = 0;
-    state.unresolved = 0;
-    let runs = [];
+  // The merge tree: groups of 3 at the bottom, then merges of 2–3 runs per level. A node with
+  // one child (a leftover run waiting for the next level) is skipped. Returns the leaves.
+  function buildTree(ids) {
+    const leaves = [];
     for (let i = 0; i < ids.length; i += 3) {
       const group = ids.slice(i, i + 3);
       // A group is a merge of single items, so ratings can settle some or all of it.
-      runs.push(group.length === 1 ? group : yield* mergeRuns(group.map((id) => [id]), state, byRating));
-      state.groupsDone++;
+      leaves.push({ inputs: group.map((id) => [id]), size: group.length, k: 3, leaf: true, waiting: 0 });
     }
-    while (runs.length > 1) {
+    let level = leaves;
+    while (level.length > 1) {
       const next = [];
-      for (let i = 0; i < runs.length; ) {
-        const k = groupSize(runs.length - i);
-        const group = runs.slice(i, i + k);
-        if (k === 1) next.push(group[0]);
+      for (let i = 0; i < level.length; ) {
+        const k = groupSize(level.length - i);
+        const children = level.slice(i, i + k);
+        if (k === 1) next.push(children[0]);
         else {
-          next.push(yield* mergeRuns(group, state, byRating));
-          state.mergeIndex++;
-          state.unresolved = 0;
+          const node = { inputs: [], size: 0, k, waiting: k };
+          children.forEach((c, slot) => { c.parent = node; c.slot = slot; node.size += c.size; });
+          next.push(node);
         }
         i += k;
       }
-      runs = next;
+      level = next;
     }
-    return runs[0] || [];
+    return leaves;
+  }
+
+  // Full sort. `state` is updated in place so callers can estimate remaining work.
+  // byRating: optional, see mergeRuns.
+  // rand: optional. Independent groups and merges can be asked about in any order without
+  // changing the questions; with rand, each question comes from a random one of those ready,
+  // so the questions aren't asked in rating order. Without it they run in order, level by level.
+  function* mergeSort3(ids, state, byRating, rand) {
+    if (ids.length <= 1) return ids.slice();
+    const nodes = [];
+    const active = [];
+    let result = null;
+    const start = (node) => {
+      node.state = { unresolved: node.size };
+      node.gen = mergeRuns(node.inputs, node.state, byRating);
+      node.step = node.gen.next();
+      if (node.step.done) finish(node);
+      else active.push(node);
+    };
+    const finish = (node) => {
+      node.done = true;
+      const run = node.size === 1 ? node.inputs[0] : node.step.value;
+      if (!node.parent) { result = run; return; }
+      node.parent.inputs[node.slot] = run;
+      if (--node.parent.waiting === 0) start(node.parent);
+    };
+    const leaves = buildTree(ids);
+    const seen = new Set();
+    for (let node of leaves) {
+      for (; node && !seen.has(node); node = node.parent) { seen.add(node); nodes.push(node); }
+    }
+    state.nodes = nodes;
+    for (const leaf of leaves) {
+      if (leaf.size === 1) finish(leaf);
+      else start(leaf);
+    }
+    while (active.length) {
+      const at = rand ? Math.floor(rand() * active.length) : 0;
+      const node = active[at];
+      const order = yield node.step.value;
+      node.step = node.gen.next(order);
+      if (node.step.done) {
+        active.splice(at, 1);
+        finish(node);
+      }
+    }
+    return result;
   }
 
   // Approximate queries still needed, given mergeSort3's state.
   function estimateRemaining(state) {
-    const { plan } = state;
-    let total = plan.runSizes.slice(state.groupsDone).filter((s) => s > 1).length;
-    plan.merges.forEach((m, i) => {
-      if (i > state.mergeIndex) total += RATE[m.k] * m.size;
-      else if (i === state.mergeIndex) total += RATE[m.k] * (state.groupsDone < plan.runSizes.length ? m.size : state.unresolved);
-    });
+    let total = 0;
+    for (const node of state.nodes || []) {
+      if (node.done || node.size === 1) continue;
+      if (node.leaf) total += 1;
+      else total += RATE[node.k] * (node.gen ? node.state.unresolved : node.size);
+    }
     return Math.max(1, Math.round(total));
   }
 
@@ -275,13 +296,16 @@
       const rated = order.filter((id) => ratings[id] != null).sort((a, b) => ratings[b] - ratings[a]);
       order = rated.concat(order.filter((id) => ratings[id] == null));
     }
+    // Questions come from a random one of the ready groups and merges. Sessions saved before this
+    // existed (answers but no schedule) keep the in-order schedule so their answers still replay.
+    const mixed = opts.schedule === 'mixed' || !(Array.isArray(opts.answers) && opts.answers.length);
     let answers = [];
     let gen, state, step;
 
     // Undo and resume work by replaying the answer log from the start.
     function replay(log) {
       state = {};
-      gen = mergeSort3(order, state, byRating);
+      gen = mergeSort3(order, state, byRating, mixed ? mulberry32(seed ^ 0x5bd1e995) : null);
       step = gen.next();
       answers = [];
       for (const a of log) {
@@ -316,7 +340,10 @@
       comparisons: () => answers.length,
       estimateRemaining: () => (step.done ? 0 : estimateRemaining(state)),
       result: () => (step.done ? step.value.map((i) => items[i]) : null),
-      serialize: () => Object.assign({ items, seed, answers: answers.map((a) => a.slice()) }, byRating ? { ratings } : {}),
+      serialize: () => Object.assign(
+        { items, seed, answers: answers.map((a) => a.slice()), schedule: mixed ? 'mixed' : 'ordered' },
+        byRating ? { ratings } : {},
+      ),
     };
   }
 
