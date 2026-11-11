@@ -7,27 +7,19 @@ Paste a list (one item per line), then click the cards from most to least prefer
 ## Features
 
 - Rank lists of any length; blank lines and duplicates are skipped
-- Paste rows from a spreadsheet: the first column is the item's name and any other columns appear as smaller details on each card (for example "1994, Quentin Tarantino" under "Pulp Fiction"). Plain one-per-line lists work as before.
+- Paste rows from a spreadsheet: the first column is the item's name and any other columns appear as smaller details on each card (for example "1994, Quentin Tarantino" under "Pulp Fiction")
 - Spreadsheet rankings copy and download as tab-separated rows with a rank column, so they paste straight back into a spreadsheet
 - Ratings cut down the picks: paste a column of ratings and items more than 1 point apart are ordered by rating without being shown to you (see below)
-- Optional import from Letterboxd: every film you've logged as watched, with your star ratings
-- Undo, plus automatic save and resume in the browser (refreshing mid-ranking is safe)
+- Import from Letterboxd: every film you've logged as watched, with your star ratings
+- Undo, plus automatic save and resume (refreshing mid-ranking is safe)
 - Progress bar with an estimate of picks remaining
 - Copy or download the final ranking as text
 - Light and dark themes
-- No build step, no dependencies, no server: plain HTML, CSS and JavaScript
+- Private: everything runs in your browser, and nothing you paste or import is uploaded
 
-## Running it
+## Using it
 
-Open `index.html` through any static web server, for example:
-
-```bash
-python -m http.server 8765
-```
-
-then visit <http://localhost:8765>. Opening the file directly from disk also works, but some browsers then block saving progress.
-
-The repository root is a complete static site, so it can be published as-is with GitHub Pages (Settings → Pages → deploy from the main branch, root folder).
+Ranker is a static site of plain HTML, CSS and JavaScript, with no build step and no dependencies. Open `index.html` in a browser, or host the repository root on any static host such as GitHub Pages. Progress is saved in your browser's local storage.
 
 ## Ratings
 
@@ -37,14 +29,16 @@ A first row such as `Film  Year  My rating` is treated as column names when it n
 
 When a rating column is found, a checkbox under the list shows which column will be used and can turn it off. The setting is remembered.
 
+Ratings are hidden on the comparison cards so they don't sway your picks; the other columns still appear as details. They're kept in the copied and downloaded results.
+
 ## Importing from Letterboxd
 
 1. On Letterboxd, open [Settings → Data](https://letterboxd.com/settings/data/) and choose **Export your data**.
 2. In Ranker, open **Import films from Letterboxd** and choose the downloaded .zip (or its `watched.csv` and `ratings.csv`).
 
-The list fills with one row per watched film: title, year and your rating in stars, ready to edit before you start. The file is read in the browser and never uploaded.
+The list fills with one row per watched film: title, year and your rating in stars, ready to edit before you start. Cards show each film's title and year, but not your rating. The file is read in the browser and never uploaded.
 
-Ranker reads the export file instead of fetching `letterboxd.com/USERNAME/films/` because Letterboxd's pages can't be read from another site in the browser, and its bot protection turns away automated requests made on your behalf.
+Ranker reads the export file rather than your Letterboxd profile because Letterboxd's pages can't be read from another site in the browser.
 
 ### How ratings are used
 
@@ -99,6 +93,8 @@ If an answer contradicts earlier ones, the part that conflicts is ignored, so th
 | `test-letterboxd.js` | Tests for the Letterboxd export reader |
 
 ## Testing
+
+The tests run with [Node.js](https://nodejs.org/):
 
 ```bash
 node sim.js
